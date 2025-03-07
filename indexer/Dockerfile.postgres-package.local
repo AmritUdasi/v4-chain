@@ -1,11 +1,16 @@
-# Dockerfile to containerize postgres package locally
-FROM dydxprotocol/indexer-node:16-alpine-m1
+# Use Node 18 alpine image
+FROM --platform=linux/amd64 node:18-alpine
 ENV NODE_ENV=development
+# Install pnpm with proper permissions
+USER root
+RUN npm install -g pnpm@8.15.1
 
-RUN adduser -S dydx
+# Add user and set permissions
+RUN addgroup -S dydx && adduser -S dydx -G dydx
 RUN mkdir -p /home/dydx/app
 RUN chown dydx -R /home/dydx/app
 
+# Set working directory
 WORKDIR /home/dydx/app
 
 # Copy pnpm lock and workspace and package.json from base directory
@@ -37,10 +42,13 @@ COPY ./packages/postgres/.env* ./packages/postgres/
 
 RUN chown dydx -R /home/dydx/app
 
-USER dydx
 
+# Install pnpm
+RUN npm install -g pnpm@6
+
+USER dydx
 # Install npm modules using pnpm
-RUN pnpm i --loglevel warn --production --frozen-lockfile --unsafe-perm
+RUN pnpm install --loglevel warn --frozen-lockfile --unsafe-perm
 
 WORKDIR /home/dydx/app/packages/postgres
 

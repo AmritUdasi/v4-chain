@@ -1,0 +1,171 @@
+FROM --platform=linux/amd64 node:18-alpine
+
+WORKDIR /app
+
+# Install required packages
+RUN apk add --no-cache bash curl jq
+
+# Create package.json
+COPY <<'EOF' /app/package.json
+{
+  "name": "chain-reader",
+  "version": "1.0.0",
+  "dependencies": {
+    "@cosmjs/tendermint-rpc": "^0.31.1",
+    "@cosmjs/stargate": "^0.31.1",
+    "kafkajs": "^2.2.4",
+    "protobufjs": "^7.2.4",
+    "long": "^5.2.0"
+  }
+}
+EOF
+
+# Install dependencies using npm
+RUN npm install
+
+# Create protobuf definition
+COPY <<'EOF' /app/block.proto
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+message IndexerTendermintBlock {
+  uint32 height = 1;
+  google.protobuf.Timestamp time = 2;
+  repeated IndexerTendermintEvent events = 3;
+  repeated string tx_hashes = 4;
+}
+
+message IndexerTendermintEvent {
+  string subtype = 1;
+  optional uint32 transaction_index = 3;
+  optional int32 block_event = 4;
+  uint32 event_index = 5;
+  uint32 version = 6;
+  bytes data_bytes = 7;
+}
+EOF
+
+# Create a simple script to read from chain and send to Kafka
+COPY <<'EOF' /app/reader.js
+const { Tendermint34Client } = require('@cosmjs/tendermint-rpc');
+const { Kafka } = require('kafkajs');
+const protobuf = require('protobufjs');
+const path = require('path');
+
+// Load protobuf definition
+const root = protobuf.loadSync(path.join(__dirname, 'block.proto'));
+const IndexerTendermintBlock = root.lookupType('IndexerTendermintBlock');
+
+async function fetchBlock(height) {
+  const response = await fetch(`${process.env.TENDERMINT_HTTP_URL || 'http://host.docker.internal:26657'}/block?height=${height}`);
+  const data = await response.json();
+  return data.result;
+}
+
+const kafka = new Kafka({
+  clientId: 'chain-reader',
+  brokers: [process.env.KAFKA_BROKER_URL || 'kafka:9092']
+});
+
+const producer = kafka.producer();
+let lastProcessedHeight = 0;
+
+async function getLatestBlock() {
+  try {
+    const response = await fetch(`${process.env.TENDERMINT_HTTP_URL || 'http://host.docker.internal:26657'}/status`);
+    const data = await response.json();
+    return parseInt(data.result.sync_info.latest_block_height);
+  } catch (error) {
+    console.error('Error getting latest block:', error);
+    return lastProcessedHeight;
+  }
+}
+
+async function processBlock(height) {
+  try {
+    const blockData = await fetchBlock(height);
+    console.log('Processing block:', height);
+    
+    const block = blockData.block;
+    const blockTime = new Date(block.header.time);
+    const txs = block.data.txs || [];
+    
+    // Format block data according to protobuf schema
+    const indexerBlock = {
+      height: parseInt(block.header.height),
+      time: {
+        seconds: Math.floor(blockTime.getTime() / 1000),
+        nanos: (blockTime.getTime() % 1000) * 1e6
+      },
+      events: txs.map((tx, txIndex) => {
+        // Decode base64 transaction
+        const txBytes = Buffer.from(tx, 'base64');
+        return {
+          subtype: "transaction",
+          transactionIndex: txIndex,
+          eventIndex: 0,
+          version: 1,
+          dataBytes: txBytes
+        };
+      }),
+      txHashes: [blockData.block_id.hash]
+    };
+
+    // Verify the message
+    const errMsg = IndexerTendermintBlock.verify(indexerBlock);
+    if (errMsg) throw Error(errMsg);
+
+    // Create and encode the message
+    const message = IndexerTendermintBlock.create(indexerBlock);
+    const buffer = IndexerTendermintBlock.encode(message).finish();
+
+    await producer.send({
+      topic: 'to-ender',
+      messages: [{
+        key: height.toString(),
+        value: buffer
+      }]
+    });
+
+    console.log('Sent block', height, 'to Kafka');
+    lastProcessedHeight = height;
+  } catch (error) {
+    console.error('Error processing block:', height, error);
+    throw error;
+  }
+}
+
+async function start() {
+  try {
+    await producer.connect();
+    console.log('Connected to Kafka');
+    console.log('Starting chain reader...');
+
+    while (true) {
+      const latestHeight = await getLatestBlock();
+      if (latestHeight > lastProcessedHeight) {
+        await processBlock(lastProcessedHeight + 1);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch (error) {
+    console.error('Failed to start:', error);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', async () => {
+  try {
+    await producer.disconnect();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+start().catch(console.error);
+EOF
+
+CMD ["node", "reader.js"] 

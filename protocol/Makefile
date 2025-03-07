@@ -338,13 +338,13 @@ localnet-new-validator:
 	@docker run --rm -it $(shell docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) . -t dydxprotocol-base && docker build . -q -f ./testing/util/Dockerfile)
 
 localnet-build:
-	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) . -t dydxprotocol-base --no-cache
+	sudo docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) . -t dydxprotocol-base --no-cache
 
 localnet-build-amd64:
 	DOCKER_BUILDKIT=1 docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -f Dockerfile . -t dydxprotocol-base --no-cache --platform linux/amd64
 
 reset-chain:
-	rm -rf localnet
+	sudo rm -rf localnet
 	# Creates the directories which store the chain data for each node.
 	mkdir -p localnet/dydxprotocol0
 	mkdir -p localnet/dydxprotocol1
@@ -364,8 +364,8 @@ localnet-init:
 
 localnet-compose-up:
 	@echo "Launching localnet at commit ${GIT_COMMIT_HASH}"
-	@docker build . -t local:dydxprotocol -f testing/testnet-local/Dockerfile --no-cache
-	@docker compose -f docker-compose.yml up --force-recreate $(ARGS)
+	@sudo docker build . -t local:dydxprotocol -f testing/testnet-local/Dockerfile --no-cache
+	@sudo docker compose -f docker-compose.yml up --force-recreate $(ARGS)
 
 localnet-compose-upd:
 	@echo "Launching localnet at commit ${GIT_COMMIT_HASH}"

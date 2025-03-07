@@ -1,22 +1,25 @@
-# Dockerfile to containerize services locally
-FROM dydxprotocol/indexer-node:16-alpine-m1
+# Use Node 18 alpine image
+FROM --platform=linux/amd64 node:18-alpine
 ENV NODE_ENV=development
 ARG service
 
+# Install required packages as root
+USER root
 RUN apk add --no-cache bash jq aws-cli
+
+# Install specific pnpm version that matches your lockfile
+RUN npm install -g pnpm@6.35.1
+
+# Add user
 RUN adduser -S dydx
 RUN mkdir -p /home/dydx/app
 RUN chown dydx -R /home/dydx/app
 
 WORKDIR /home/dydx/app
 
-# Copy pnpm lock and workspace and package.json from base directory
+# Copy files with correct ownership
 COPY ./pnpm-lock.yaml ./pnpm-workspace.yaml ./package.json ./
-
-# Copy patches
 COPY ./patches ./patches
-
-# Copy package.json from all packages being run
 COPY ./packages/base/package.json ./packages/base/
 COPY ./packages/kafka/package.json ./packages/kafka/
 COPY ./packages/postgres/package.json ./packages/postgres/
@@ -26,7 +29,7 @@ COPY ./packages/v4-proto-parser/package.json ./packages/v4-proto-parser/package.
 COPY ./packages/compliance/package.json ./packages/compliance/
 COPY ./packages/notifications/package.json ./packages/notifications/
 
-# Copy build files from all packages being run
+# Copy build files
 COPY ./packages/base/build ./packages/base/build/
 COPY ./packages/kafka/build ./packages/kafka/build/
 COPY ./packages/postgres/build ./packages/postgres/build/
@@ -36,19 +39,21 @@ COPY ./packages/v4-proto-parser/build ./packages/v4-proto-parser/build/
 COPY ./packages/compliance/build ./packages/compliance/build/
 COPY ./packages/notifications/build ./packages/notifications/build/
 
-# Copy package.json, build files, and environment files from service being run
+# Copy service files
 COPY ./services/${service}/package.json ./services/${service}/
 COPY ./services/${service}/build ./services/${service}/build
 COPY ./services/${service}/.env* ./services/${service}/
 
 # Copy container start script
 COPY ./scripts/container-run.sh /home/dydx/app/services/$service/scripts/
-
 RUN chown dydx -R /home/dydx/app
+# Switch to dydx user
+
+# RUN pnpm build:all
+# Install dependencies without frozen lockfile
+RUN pnpm i --loglevel warn  --frozen-lockfile --unsafe-perm
 
 USER dydx
-RUN pnpm i --loglevel warn --production --frozen-lockfile --unsafe-perm
-
 WORKDIR /home/dydx/app/services/$service
 
 CMD ["sh", "-c", "bash ./scripts/container-run.sh"]
