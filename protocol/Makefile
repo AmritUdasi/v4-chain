@@ -372,7 +372,7 @@ localnet-compose-upd:
 	@docker build . -t local:dydxprotocol -f testing/testnet-local/Dockerfile --no-cache
 	@docker compose -f docker-compose.yml up --force-recreate -d $(ARGS)
 
-build-e2etest-image:
+build-devnet-image:
 	@echo "Build e2e test image at commit ${GIT_COMMIT_HASH}"
 	@docker build . -t local:e2etest-dydxprotocol -f testing/e2etest-local/Dockerfile --no-cache
 

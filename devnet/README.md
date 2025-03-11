@@ -1,6 +1,6 @@
-# E2E testing
+# DEVNET
 
-E2E testing framework for Indexer/protocol.
+devnet framework for Indexer/protocol.
 
 ### Instructions
 

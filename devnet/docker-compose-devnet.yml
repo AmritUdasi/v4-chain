@@ -260,3 +260,13 @@ services:
     ports:
       - "8080:8080"
       - "8002:8002" # metrics
+
+  setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.setup
+    volumes:
+      - ../protocol/localnet/dydxprotocol0:/dydxprotocol/chain/.alice/data
+    depends_on:
+      - dydxprotocold0
+      - dydxprotocold1
